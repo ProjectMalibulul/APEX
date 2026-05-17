@@ -1,0 +1,6 @@
+[package]
+name = "apex-git"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+

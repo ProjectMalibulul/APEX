@@ -1,0 +1,18 @@
+model User {
+  id    String @id
+  posts Post[]
+}
+
+model Post {
+  id       String @id
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+  comments Comment[]
+}
+
+model Comment {
+  id     String @id
+  post   Post   @relation(fields: [postId], references: [id])
+  postId String
+}
+

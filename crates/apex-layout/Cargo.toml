@@ -1,0 +1,9 @@
+[package]
+name = "apex-layout"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+apex-core = { path = "../apex-core" }
+

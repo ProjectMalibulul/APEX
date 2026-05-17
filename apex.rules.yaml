@@ -1,0 +1,6 @@
+version: 1
+rules:
+  - id: RULE-LAYER-001
+    type: forbidden_import
+    from: api
+    to: infrastructure

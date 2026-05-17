@@ -1,0 +1,19 @@
+[workspace]
+members = [
+  "crates/apex-core",
+  "crates/apex-parser",
+  "crates/apex-graph",
+  "crates/apex-layout",
+  "crates/apex-rules",
+  "crates/apex-git",
+  "crates/apex-plugin",
+  "crates/apexd",
+  "crates/apex-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+

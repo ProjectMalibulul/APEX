@@ -1,0 +1,11 @@
+{
+  "name": "@apex/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "cd .. && npm run build",
+    "test": "cd .. && npm run test"
+  }
+}
+

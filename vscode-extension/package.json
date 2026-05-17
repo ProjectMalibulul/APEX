@@ -1,0 +1,17 @@
+{
+  "name": "apex-vscode-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/extension.js",
+  "activationEvents": ["onCommand:apex.renderClassDiagram"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "apex.renderClassDiagram",
+        "title": "Apex: Render Class Diagram"
+      }
+    ]
+  }
+}
+
