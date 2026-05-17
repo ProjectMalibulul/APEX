@@ -4,11 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --strict",
-    "test": "npm run build && node --test ui/tests/*.test.mjs vscode-extension/tests/*.test.mjs"
+    "build": "tsc --strict && npm run build:ui",
+    "build:types": "tsc --strict",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "dev:ui": "vite --config ui/vite.config.ts",
+    "preview:ui": "vite preview --config ui/vite.config.ts",
+    "test": "npm run build && node --test ui/tests/*.test.mjs vscode-extension/tests/*.test.mjs",
+    "test:ui": "npm run build && node --test ui/tests/*.test.mjs",
+    "test:vscode": "npm run build && node --test vscode-extension/tests/*.test.mjs",
+    "smoke:vscode": "npm run test:vscode"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
   }
 }
-

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Apex Workbench</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Apex local workbench</p>
+          <h1>Scan, check, and render architecture locally.</h1>
+          <p>Run `apex ui`, point this workbench at a repository path, and generate diagrams through the local Apex API. No source leaves your machine.</p>
+        </div>
+        <div class="status-card">
+          <span id="server-status">Connecting to Apex API...</span>
+          <strong id="stats">No graph loaded</strong>
+        </div>
+      </section>
+
+      <section class="command-bar">
+        <label for="repo-path">Repository path</label>
+        <input id="repo-path" value="test-fixtures/sample-repo" />
+        <button id="scan-button">Scan repository</button>
+        <button id="check-button" type="button">Run rules</button>
+        <select id="format-select" aria-label="Diagram format">
+          <option value="svg">SVG</option>
+          <option value="mermaid">Mermaid</option>
+          <option value="html">HTML</option>
+          <option value="json">JSON</option>
+        </select>
+        <button id="api-render-button" type="button">Render via API</button>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel">
+          <div class="panel-heading">
+            <h2>Graph input</h2>
+            <label class="file-picker" for="graph-file">Import JSON</label>
+            <input id="graph-file" type="file" accept="application/json,.json" />
+          </div>
+          <textarea id="graph-input" spellcheck="false"></textarea>
+          <div class="controls">
+            <input id="focus-node" placeholder="Focus node id, e.g. type:UserService" />
+            <input id="focus-hops" type="number" min="0" value="1" />
+          </div>
+          <div class="actions">
+            <button id="render-button">Render diagram</button>
+            <button id="sample-button" type="button">Load sample</button>
+          </div>
+          <p class="error" id="error-output" role="alert"></p>
+        </aside>
+
+        <section class="canvas">
+          <div class="canvas-toolbar">
+            <span id="diagram-title">Interactive SVG preview</span>
+            <button id="download-button" type="button">Download current output</button>
+          </div>
+          <div id="diagram" class="diagram"></div>
+        </section>
+      </section>
+
+      <section class="panel split-panel">
+        <div>
+          <h2>Rules</h2>
+          <div id="violations" class="violations">Run rules to see violations.</div>
+        </div>
+        <div>
+          <h2>Generated output</h2>
+          <pre id="mermaid-output"></pre>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

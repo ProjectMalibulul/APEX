@@ -1,6 +1,6 @@
 target/
 node_modules/
 dist/
+artifacts/
 .apex/graph/
-docs/*_latest.txt
-
+docs/*

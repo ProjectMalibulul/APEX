@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "main": "./dist/extension.js",
+  "scripts": {
+    "build": "cd .. && npm run build",
+    "test": "cd .. && npm run test:vscode",
+    "smoke": "cd .. && npm run smoke:vscode"
+  },
   "activationEvents": ["onCommand:apex.renderClassDiagram"],
   "contributes": {
     "commands": [
@@ -14,4 +19,3 @@
     ]
   }
 }
-

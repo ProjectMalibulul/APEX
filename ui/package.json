@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "cd .. && npm run build",
+    "build": "cd .. && npm run build:ui",
+    "dev": "cd .. && npm run dev:ui",
+    "preview": "cd .. && npm run preview:ui",
     "test": "cd .. && npm run test"
   }
 }
-

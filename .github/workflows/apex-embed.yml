@@ -19,9 +19,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: cargo test --workspace
+      - uses: extractions/setup-just@v2
       - run: npm ci
-      - run: npm test
-      - run: go test ./...
-        working-directory: collab
-
+      - run: just verify
