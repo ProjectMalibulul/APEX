@@ -226,12 +226,19 @@ impl Graph {
     /// Serializes graph data into Mermaid class-diagram syntax.
     pub fn to_mermaid(&self) -> String {
         let mut out = String::from("classDiagram\n");
-        for node in self.nodes.values() {
-            if matches!(node.kind, NodeKind::Type | NodeKind::Entity) {
+        let diagram_ids = self.diagram_node_ids();
+        for id in &diagram_ids {
+            if let Some(node) = self.nodes.get(id) {
                 out.push_str(&format!("  class {}\n", sanitize_mermaid(&node.name)));
             }
         }
         for edge in &self.edges {
+            if matches!(edge.kind, EdgeKind::Contains)
+                || !diagram_ids.contains(&edge.from)
+                || !diagram_ids.contains(&edge.to)
+            {
+                continue;
+            }
             if let (Some(from), Some(to)) = (self.nodes.get(&edge.from), self.nodes.get(&edge.to)) {
                 let arrow = match edge.kind {
                     EdgeKind::Extends => "--|>",
@@ -252,7 +259,7 @@ impl Graph {
 
     /// Serializes graph data into an accessible SVG.
     pub fn to_svg(&self) -> String {
-        let layout = layered_layout(self);
+        let layout = diagram_layout(self);
         let width = 260usize.max(layout.len() * 180 + 40);
         let height = 240usize.max(layout.values().map(|(_, y)| *y).max().unwrap_or(0) + 100);
         let mut out = format!(
@@ -260,6 +267,9 @@ impl Graph {
             width, height
         );
         for edge in &self.edges {
+            if matches!(edge.kind, EdgeKind::Contains) {
+                continue;
+            }
             if let (Some((x1, y1)), Some((x2, y2))) = (layout.get(&edge.from), layout.get(&edge.to))
             {
                 out.push_str(&format!(
@@ -287,6 +297,14 @@ impl Graph {
         out.push_str("</svg>");
         out
     }
+
+    fn diagram_node_ids(&self) -> BTreeSet<String> {
+        self.nodes
+            .iter()
+            .filter(|(_, node)| matches!(node.kind, NodeKind::Type | NodeKind::Entity))
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
 }
 
 /// Returns a deterministic layered layout for the graph.
@@ -301,6 +319,53 @@ pub fn layered_layout(graph: &Graph) -> BTreeMap<String, (usize, usize)> {
             (id, (x, y))
         })
         .collect()
+}
+
+fn diagram_layout(graph: &Graph) -> BTreeMap<String, (usize, usize)> {
+    let diagram_ids = graph.diagram_node_ids();
+    let mut remaining = diagram_ids.clone();
+    let mut components: Vec<Vec<String>> = Vec::new();
+    while let Some(seed) = remaining.iter().next().cloned() {
+        let mut component = Vec::new();
+        let mut queue = VecDeque::from([seed.clone()]);
+        remaining.remove(&seed);
+        while let Some(current) = queue.pop_front() {
+            component.push(current.clone());
+            for edge in graph
+                .edges
+                .iter()
+                .filter(|edge| !matches!(edge.kind, EdgeKind::Contains))
+            {
+                let next = if edge.from == current && diagram_ids.contains(&edge.to) {
+                    Some(edge.to.clone())
+                } else if edge.to == current && diagram_ids.contains(&edge.from) {
+                    Some(edge.from.clone())
+                } else {
+                    None
+                };
+                if let Some(next) = next {
+                    if remaining.remove(&next) {
+                        queue.push_back(next);
+                    }
+                }
+            }
+        }
+        component.sort();
+        components.push(component);
+    }
+    components.sort_by(|left, right| left.first().cmp(&right.first()));
+    let mut layout = BTreeMap::new();
+    let mut y_offset = 40usize;
+    for component in components {
+        for (index, id) in component.iter().enumerate() {
+            layout.insert(
+                id.clone(),
+                (40 + (index % 4) * 180, y_offset + (index / 4) * 110),
+            );
+        }
+        y_offset += ((component.len().saturating_sub(1) / 4) + 1) * 110 + 70;
+    }
+    layout
 }
 
 /// Parses a repository into a graph using lightweight language recognizers.
@@ -545,27 +610,15 @@ fn collect_files(root: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
 }
 
 fn parse_typescript(graph: &mut Graph, path: &str, content: &str) {
-    let file_id = format!("file:{path}");
-    graph.upsert_node(Node {
-        id: file_id.clone(),
-        name: path.to_string(),
-        kind: NodeKind::File,
-        path: path.to_string(),
-        layer: layer_for_path(path),
-    });
+    let file_id = insert_file_node(graph, path);
+    let mut local_types = Vec::new();
+    let mut imports = Vec::new();
     for line in content.lines() {
         if let Some(name) =
             after_keyword(line, "class").or_else(|| after_keyword(line, "interface"))
         {
-            let node_id = format!("type:{name}");
-            graph.upsert_node(Node {
-                id: node_id.clone(),
-                name: name.clone(),
-                kind: NodeKind::Type,
-                path: path.to_string(),
-                layer: layer_for_path(path),
-            });
-            graph.add_edge(file_id.clone(), node_id.clone(), EdgeKind::Contains);
+            let node_id = insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+            local_types.push(node_id.clone());
             if let Some(parent) = after_keyword(line, "extends") {
                 graph.add_edge(node_id.clone(), format!("type:{parent}"), EdgeKind::Extends);
             }
@@ -575,29 +628,16 @@ fn parse_typescript(graph: &mut Graph, path: &str, content: &str) {
         }
         if line.trim_start().starts_with("import ") {
             for imported in imported_symbols(line) {
-                let imported_id = format!("type:{imported}");
-                graph.upsert_node(Node {
-                    id: imported_id.clone(),
-                    name: imported.clone(),
-                    kind: NodeKind::Type,
-                    path: imported.clone(),
-                    layer: layer_for_import(line),
-                });
-                graph.add_edge(file_id.clone(), imported_id, EdgeKind::Imports);
+                imports.push((imported, layer_for_import(line)));
             }
         }
     }
+    add_import_edges(graph, path, &local_types, imports);
 }
 
 fn parse_python(graph: &mut Graph, path: &str, content: &str) {
-    let file_id = format!("file:{path}");
-    graph.upsert_node(Node {
-        id: file_id.clone(),
-        name: path.to_string(),
-        kind: NodeKind::File,
-        path: path.to_string(),
-        layer: layer_for_path(path),
-    });
+    let file_id = insert_file_node(graph, path);
+    let mut current_class: Option<String> = None;
     for line in content.lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix("class ") {
@@ -610,19 +650,18 @@ fn parse_python(graph: &mut Graph, path: &str, content: &str) {
             if name.is_empty() {
                 continue;
             }
-            let node_id = format!("type:{name}");
-            graph.upsert_node(Node {
-                id: node_id.clone(),
-                name: name.clone(),
-                kind: if content.contains("models.Model") {
+            let node_id = insert_type_node(
+                graph,
+                path,
+                &file_id,
+                &name,
+                if content.contains("models.Model") {
                     NodeKind::Entity
                 } else {
                     NodeKind::Type
                 },
-                path: path.to_string(),
-                layer: layer_for_path(path),
-            });
-            graph.add_edge(file_id.clone(), node_id.clone(), EdgeKind::Contains);
+            );
+            current_class = Some(node_id.clone());
             if let Some(parent) = rest
                 .split('(')
                 .nth(1)
@@ -642,43 +681,34 @@ fn parse_python(graph: &mut Graph, path: &str, content: &str) {
                 .unwrap_or_default()
                 .trim_matches(['"', '\'', ' ']);
             if !target.is_empty() {
-                graph.add_edge(
-                    file_id.clone(),
-                    format!("type:{target}"),
-                    EdgeKind::RelatesTo,
-                );
+                let source = current_class.clone().unwrap_or_else(|| file_id.clone());
+                graph.add_edge(source, format!("type:{target}"), EdgeKind::RelatesTo);
             }
         }
     }
 }
 
 fn parse_java(graph: &mut Graph, path: &str, content: &str) {
-    let file_id = format!("file:{path}");
-    graph.upsert_node(Node {
-        id: file_id.clone(),
-        name: path.to_string(),
-        kind: NodeKind::File,
-        path: path.to_string(),
-        layer: layer_for_path(path),
-    });
+    let file_id = insert_file_node(graph, path);
+    let mut local_types = Vec::new();
+    let mut imports = Vec::new();
     for line in content.lines() {
         if let Some(name) =
             after_keyword(line, "class").or_else(|| after_keyword(line, "interface"))
         {
             let entity = content.contains("@Entity");
-            let node_id = format!("type:{name}");
-            graph.upsert_node(Node {
-                id: node_id.clone(),
-                name: name.clone(),
-                kind: if entity {
+            let node_id = insert_type_node(
+                graph,
+                path,
+                &file_id,
+                &name,
+                if entity {
                     NodeKind::Entity
                 } else {
                     NodeKind::Type
                 },
-                path: path.to_string(),
-                layer: layer_for_path(path),
-            });
-            graph.add_edge(file_id.clone(), node_id.clone(), EdgeKind::Contains);
+            );
+            local_types.push(node_id.clone());
             if let Some(interface) = after_keyword(line, "implements") {
                 graph.add_edge(node_id, format!("type:{interface}"), EdgeKind::Implements);
             }
@@ -692,14 +722,11 @@ fn parse_java(graph: &mut Graph, path: &str, content: &str) {
                 .next()
                 .unwrap_or_default();
             if !imported.is_empty() {
-                graph.add_edge(
-                    file_id.clone(),
-                    format!("type:{imported}"),
-                    EdgeKind::Imports,
-                );
+                imports.push((imported.to_string(), layer_for_import(line)));
             }
         }
     }
+    add_import_edges(graph, path, &local_types, imports);
 }
 
 fn parse_prisma(graph: &mut Graph, path: &str, content: &str) {
@@ -737,6 +764,8 @@ fn parse_prisma(graph: &mut Graph, path: &str, content: &str) {
 fn parse_go(graph: &mut Graph, path: &str, content: &str) {
     let file_id = insert_file_node(graph, path);
     let mut in_import_block = false;
+    let mut current_type: Option<String> = None;
+    let mut brace_depth = 0usize;
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed == "import (" {
@@ -750,29 +779,32 @@ fn parse_go(graph: &mut Graph, path: &str, content: &str) {
         if let Some(name) = go_type_name(trimmed, "type ", " struct")
             .or_else(|| go_type_name(trimmed, "type ", " interface"))
         {
-            insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
-        }
-        if let Some(name) = trimmed
-            .strip_prefix("func ")
-            .and_then(|rest| rest.split('(').next())
-        {
-            if !name.is_empty() && name.chars().next().is_some_and(char::is_uppercase) {
-                insert_type_node(graph, path, &file_id, name, NodeKind::Type);
+            let node_id = insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+            current_type = Some(node_id);
+            brace_depth = count_char(trimmed, '{').saturating_sub(count_char(trimmed, '}'));
+            for (_, target) in qualified_type_refs(trimmed) {
+                if let Some(source) = &current_type {
+                    add_semantic_reference(graph, source, &target, path, EdgeKind::Imports, None);
+                }
             }
+            continue;
         }
-        if trimmed.starts_with("import ") || in_import_block {
-            let import_name = trimmed
-                .trim_start_matches("import ")
-                .trim_matches(['"', '`', '(', ')', ' '])
-                .rsplit('/')
-                .next()
-                .unwrap_or_default();
-            if !import_name.is_empty() {
-                graph.add_edge(
-                    file_id.clone(),
-                    format!("type:{import_name}"),
+        if let Some(source) = &current_type {
+            for (qualifier, target) in qualified_type_refs(trimmed) {
+                let target_path = format!("{qualifier}.{target}");
+                add_semantic_reference(
+                    graph,
+                    source,
+                    &target,
+                    &target_path,
                     EdgeKind::Imports,
+                    layer_for_reference(&qualifier),
                 );
+            }
+            brace_depth += count_char(trimmed, '{');
+            brace_depth = brace_depth.saturating_sub(count_char(trimmed, '}'));
+            if brace_depth == 0 && trimmed.contains('}') {
+                current_type = None;
             }
         }
     }
@@ -780,17 +812,42 @@ fn parse_go(graph: &mut Graph, path: &str, content: &str) {
 
 fn parse_rust(graph: &mut Graph, path: &str, content: &str) {
     let file_id = insert_file_node(graph, path);
+    let mut local_types = Vec::new();
+    let mut imports = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
         for keyword in ["struct", "enum", "trait"] {
             if let Some(name) = after_keyword(trimmed, keyword) {
-                insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+                let node_id = insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+                local_types.push(node_id);
             }
         }
-        if let Some(name) = after_keyword(trimmed, "impl") {
-            let clean = name.split('<').next().unwrap_or(&name).trim();
-            if !clean.is_empty() && clean != "for" {
-                insert_type_node(graph, path, &file_id, clean, NodeKind::Type);
+        if let Some(rest) = trimmed.strip_prefix("impl ") {
+            if let Some((trait_name, type_name)) = rest.split_once(" for ") {
+                let trait_name = trait_name
+                    .trim()
+                    .split('<')
+                    .next()
+                    .unwrap_or(trait_name)
+                    .trim();
+                let type_name = type_name
+                    .trim()
+                    .split(['<', '{', ' '])
+                    .next()
+                    .unwrap_or_default();
+                if !trait_name.is_empty() && !type_name.is_empty() {
+                    graph.add_edge(
+                        format!("type:{type_name}"),
+                        format!("type:{trait_name}"),
+                        EdgeKind::Implements,
+                    );
+                }
+            } else if let Some(name) = after_keyword(trimmed, "impl") {
+                let clean = name.split('<').next().unwrap_or(&name).trim();
+                if !clean.is_empty() && clean != "for" {
+                    let node_id = insert_type_node(graph, path, &file_id, clean, NodeKind::Type);
+                    local_types.push(node_id);
+                }
             }
         }
         if trimmed.starts_with("use ") {
@@ -798,30 +855,30 @@ fn parse_rust(graph: &mut Graph, path: &str, content: &str) {
                 .trim_start_matches("use ")
                 .trim_end_matches(';')
                 .split("::")
-                .next()
+                .last()
                 .unwrap_or_default();
             if !imported.is_empty()
                 && imported != "crate"
                 && imported != "self"
                 && imported != "super"
             {
-                graph.add_edge(
-                    file_id.clone(),
-                    format!("type:{imported}"),
-                    EdgeKind::Imports,
-                );
+                imports.push((imported.to_string(), None));
             }
         }
     }
+    add_import_edges(graph, path, &local_types, imports);
 }
 
 fn parse_kotlin(graph: &mut Graph, path: &str, content: &str) {
     let file_id = insert_file_node(graph, path);
+    let mut local_types = Vec::new();
+    let mut imports = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
         for keyword in ["class", "interface", "object", "data"] {
             if let Some(name) = after_keyword(trimmed, keyword) {
-                insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+                let node_id = insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+                local_types.push(node_id);
                 if let Some(parent) = trimmed
                     .split(':')
                     .nth(1)
@@ -845,23 +902,23 @@ fn parse_kotlin(graph: &mut Graph, path: &str, content: &str) {
                 .next()
                 .unwrap_or_default();
             if !imported.is_empty() {
-                graph.add_edge(
-                    file_id.clone(),
-                    format!("type:{imported}"),
-                    EdgeKind::Imports,
-                );
+                imports.push((imported.to_string(), layer_for_import(line)));
             }
         }
     }
+    add_import_edges(graph, path, &local_types, imports);
 }
 
 fn parse_csharp(graph: &mut Graph, path: &str, content: &str) {
     let file_id = insert_file_node(graph, path);
+    let mut local_types = Vec::new();
+    let mut imports = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
         for keyword in ["class", "interface", "struct", "record"] {
             if let Some(name) = after_keyword(trimmed, keyword) {
-                insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+                let node_id = insert_type_node(graph, path, &file_id, &name, NodeKind::Type);
+                local_types.push(node_id);
                 if let Some(parent_list) = trimmed.split(':').nth(1) {
                     for parent in parent_list.split(',') {
                         let parent = parent.split_whitespace().next().unwrap_or_default();
@@ -884,14 +941,11 @@ fn parse_csharp(graph: &mut Graph, path: &str, content: &str) {
                 .next()
                 .unwrap_or_default();
             if !imported.is_empty() {
-                graph.add_edge(
-                    file_id.clone(),
-                    format!("type:{imported}"),
-                    EdgeKind::Imports,
-                );
+                imports.push((imported.to_string(), layer_for_import(line)));
             }
         }
     }
+    add_import_edges(graph, path, &local_types, imports);
 }
 
 fn parse_sql(graph: &mut Graph, path: &str, content: &str) {
@@ -976,10 +1030,16 @@ fn insert_file_node(graph: &mut Graph, path: &str) -> String {
     file_id
 }
 
-fn insert_type_node(graph: &mut Graph, path: &str, file_id: &str, name: &str, kind: NodeKind) {
+fn insert_type_node(
+    graph: &mut Graph,
+    path: &str,
+    file_id: &str,
+    name: &str,
+    kind: NodeKind,
+) -> String {
     let clean = name.trim_matches(['{', '}', '(', ')', ':', ',', ';']);
     if clean.is_empty() {
-        return;
+        return String::new();
     }
     let node_id = format!("type:{clean}");
     graph.upsert_node(Node {
@@ -989,7 +1049,8 @@ fn insert_type_node(graph: &mut Graph, path: &str, file_id: &str, name: &str, ki
         path: path.to_string(),
         layer: layer_for_path(path),
     });
-    graph.add_edge(file_id.to_string(), node_id, EdgeKind::Contains);
+    graph.add_edge(file_id.to_string(), node_id.clone(), EdgeKind::Contains);
+    node_id
 }
 
 fn go_type_name(line: &str, prefix: &str, marker: &str) -> Option<String> {
@@ -1000,6 +1061,122 @@ fn go_type_name(line: &str, prefix: &str, marker: &str) -> Option<String> {
         .split_whitespace()
         .next()
         .map(ToOwned::to_owned)
+}
+
+fn add_import_edges(
+    graph: &mut Graph,
+    _path: &str,
+    local_types: &[String],
+    imports: Vec<(String, Option<String>)>,
+) {
+    for source in local_types {
+        for (target, layer) in &imports {
+            add_semantic_reference(
+                graph,
+                source,
+                target,
+                target,
+                EdgeKind::Imports,
+                layer.clone(),
+            );
+        }
+    }
+}
+
+fn add_semantic_reference(
+    graph: &mut Graph,
+    source: &str,
+    target: &str,
+    target_path: &str,
+    kind: EdgeKind,
+    layer: Option<String>,
+) {
+    let clean = target
+        .trim_matches(['{', '}', '(', ')', ':', ',', ';', '*', '&', '[', ']'])
+        .trim();
+    if clean.is_empty() || clean == source.trim_start_matches("type:") || is_builtin_type(clean) {
+        return;
+    }
+    let target_id = format!("type:{clean}");
+    if !graph.nodes.contains_key(&target_id) {
+        graph.upsert_node(Node {
+            id: target_id.clone(),
+            name: clean.to_string(),
+            kind: NodeKind::Type,
+            path: target_path.to_string(),
+            layer,
+        });
+    }
+    graph.add_edge(source.to_string(), target_id, kind);
+}
+
+fn qualified_type_refs(line: &str) -> Vec<(String, String)> {
+    let mut refs = Vec::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if is_ident_start(chars[index]) {
+            let start = index;
+            index += 1;
+            while index < chars.len() && is_ident_continue(chars[index]) {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] == '.' {
+                let qualifier: String = chars[start..index].iter().collect();
+                index += 1;
+                if index < chars.len() && is_ident_start(chars[index]) {
+                    let target_start = index;
+                    index += 1;
+                    while index < chars.len() && is_ident_continue(chars[index]) {
+                        index += 1;
+                    }
+                    let target: String = chars[target_start..index].iter().collect();
+                    if target.chars().next().is_some_and(char::is_uppercase) {
+                        refs.push((qualifier, target));
+                    }
+                }
+            }
+        } else {
+            index += 1;
+        }
+    }
+    refs
+}
+
+fn count_char(value: &str, needle: char) -> usize {
+    value.chars().filter(|ch| *ch == needle).count()
+}
+
+fn is_ident_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_ident_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+fn is_builtin_type(value: &str) -> bool {
+    matches!(
+        value,
+        "string"
+            | "str"
+            | "String"
+            | "bool"
+            | "boolean"
+            | "int"
+            | "i32"
+            | "i64"
+            | "u32"
+            | "u64"
+            | "usize"
+            | "float"
+            | "float64"
+            | "double"
+            | "void"
+            | "None"
+            | "Option"
+            | "Result"
+    )
 }
 
 fn imported_symbols(line: &str) -> Vec<String> {
@@ -1070,6 +1247,21 @@ fn layer_for_import(line: &str) -> Option<String> {
         Some("infrastructure".to_string())
     } else if line.contains("api") {
         Some("api".to_string())
+    } else {
+        None
+    }
+}
+
+fn layer_for_reference(qualifier: &str) -> Option<String> {
+    let lower = qualifier.to_ascii_lowercase();
+    if lower.contains("repo") || lower.contains("data") || lower.contains("db") {
+        Some("data".to_string())
+    } else if lower.contains("infra") || lower.contains("cache") {
+        Some("infrastructure".to_string())
+    } else if lower.contains("api") || lower.contains("controller") {
+        Some("api".to_string())
+    } else if lower.contains("service") || lower.contains("domain") {
+        Some("service".to_string())
     } else {
         None
     }
@@ -1224,5 +1416,64 @@ mod tests {
         assert_eq!(rules[0].id, "CUSTOM-001");
         assert_eq!(rules[0].from.as_deref(), Some("service"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_go_parser_creates_symbol_edges_not_package_edges() {
+        let root = std::env::temp_dir().join(format!("apex-go-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join("service.go"),
+            "package service\n\nimport (\n    \"example.com/acme/repository\"\n)\n\ntype UserService struct {\n    repository repository.UserRepository\n}\n\ntype UserReader interface {\n    FindUser(id string) string\n}\n\nfunc NewUserService(repository repository.UserRepository) UserService {\n    return UserService{repository: repository}\n}\n",
+        )
+        .expect("write go fixture");
+
+        let graph = parse_repository(&root).expect("parse go fixture");
+
+        assert!(graph.nodes.contains_key("type:UserService"));
+        assert!(graph.nodes.contains_key("type:UserRepository"));
+        assert!(graph.nodes.contains_key("type:UserReader"));
+        assert!(!graph.nodes.contains_key("type:repository"));
+        assert!(!graph.nodes.contains_key("type:NewUserService"));
+        assert!(graph.edges.contains(&Edge {
+            from: "type:UserService".to_string(),
+            to: "type:UserRepository".to_string(),
+            kind: EdgeKind::Imports,
+        }));
+        assert!(!graph
+            .edges
+            .iter()
+            .any(|edge| edge.from.starts_with("file:") && matches!(edge.kind, EdgeKind::Imports)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_disconnected_type_nodes_render_without_forced_edges() {
+        let mut graph = Graph::new();
+        graph.upsert_node(Node {
+            id: "type:Alpha".into(),
+            name: "Alpha".into(),
+            kind: NodeKind::Type,
+            path: "alpha.go".into(),
+            layer: None,
+        });
+        graph.upsert_node(Node {
+            id: "type:Beta".into(),
+            name: "Beta".into(),
+            kind: NodeKind::Type,
+            path: "beta.go".into(),
+            layer: None,
+        });
+
+        let mermaid = graph.to_mermaid();
+        let svg = graph.to_svg();
+
+        assert!(mermaid.contains("class Alpha"));
+        assert!(mermaid.contains("class Beta"));
+        assert!(!mermaid.contains("-->"));
+        assert!(svg.contains("Alpha"));
+        assert!(svg.contains("Beta"));
+        assert!(!svg.contains("<line"));
     }
 }

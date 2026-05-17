@@ -21,16 +21,18 @@ fn run() -> Result<(), String> {
         "init" => init_workspace(Path::new(".")).map_err(|error| error.to_string()),
         "scan" => {
             let root = args.next().unwrap_or_else(|| ".".to_string());
+            let root_path = expand_path_shorthand(&root)?;
             let graph =
-                apex_core::parse_repository(Path::new(&root)).map_err(|error| error.to_string())?;
+                apex_core::parse_repository(&root_path).map_err(|error| error.to_string())?;
             println!("{}", graph.to_json());
             Ok(())
         }
         "check" => {
             let options = CheckOptions::from_args(args.collect())?;
-            let graph = apex_core::parse_repository(Path::new(&options.root))
-                .map_err(|error| error.to_string())?;
-            let rules = load_rules_for_cli(&options.root, options.rules.as_deref())?;
+            let root_path = expand_path_shorthand(&options.root)?;
+            let graph =
+                apex_core::parse_repository(&root_path).map_err(|error| error.to_string())?;
+            let rules = load_rules_for_cli(&root_path, options.rules.as_deref())?;
             let violations = apex_core::check_graph_with_rules(&graph, &rules);
             if violations.is_empty() {
                 println!("Apex check passed: no violations");
@@ -47,7 +49,8 @@ fn run() -> Result<(), String> {
         }
         "serve" => {
             let root = args.next().unwrap_or_else(|| ".".to_string());
-            let status = apexd::serve_once(Path::new(&root)).map_err(|error| error.to_string())?;
+            let root_path = expand_path_shorthand(&root)?;
+            let status = apexd::serve_once(&root_path).map_err(|error| error.to_string())?;
             println!(
                 "Apex daemon scan ready for {} with {} graph nodes; run `apex ui` for the local workbench",
                 status.workspace, status.nodes
@@ -143,12 +146,13 @@ impl CheckOptions {
 }
 
 fn load_rules_for_cli(
-    root: &str,
+    root: &Path,
     rules_path: Option<&str>,
 ) -> Result<Vec<apex_core::RuleDefinition>, String> {
     let path = rules_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(root).join("apex.rules.yaml"));
+        .map(expand_path_shorthand)
+        .transpose()?
+        .unwrap_or_else(|| root.join("apex.rules.yaml"));
     if path.exists() {
         apex_core::load_rules(&path)
             .map_err(|error| format!("failed to load '{}': {error}", path.display()))
@@ -161,7 +165,7 @@ fn load_rules_for_cli(
 struct ExportOptions {
     format: String,
     root: String,
-    output: Option<PathBuf>,
+    output: Option<String>,
 }
 
 impl ExportOptions {
@@ -182,10 +186,11 @@ impl ExportOptions {
                 }
                 "--out" | "-o" => {
                     index += 1;
-                    output = Some(PathBuf::from(
+                    output = Some(
                         args.get(index)
-                            .ok_or_else(|| "--out requires a value".to_string())?,
-                    ));
+                            .ok_or_else(|| "--out requires a value".to_string())?
+                            .to_string(),
+                    );
                 }
                 "--help" | "-h" => {
                     return Err(
@@ -219,7 +224,8 @@ impl ExportOptions {
 }
 
 fn export_diagram(options: ExportOptions) -> Result<(), String> {
-    let graph = apex_core::parse_repository(Path::new(&options.root))
+    let root_path = expand_path_shorthand(&options.root)?;
+    let graph = apex_core::parse_repository(&root_path)
         .map_err(|error| format!("failed to scan '{}': {error}", options.root))?;
     let content = match options.format.as_str() {
         "json" => graph.to_json(),
@@ -228,7 +234,8 @@ fn export_diagram(options: ExportOptions) -> Result<(), String> {
         "html" => graph_to_html(&graph),
         _ => unreachable!("format was validated"),
     };
-    if let Some(path) = options.output {
+    if let Some(output) = options.output {
+        let path = expand_path_shorthand(&output)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|error| format!("failed to create '{}': {error}", parent.display()))?;
@@ -253,7 +260,7 @@ impl UiOptions {
     fn from_args(args: Vec<String>) -> Result<Self, String> {
         let mut host = "127.0.0.1".to_string();
         let mut port = 4317u16;
-        let mut ui_dist = PathBuf::from("ui/dist");
+        let mut ui_dist = "ui/dist".to_string();
         let mut index = 0;
         while index < args.len() {
             match args[index].as_str() {
@@ -275,10 +282,10 @@ impl UiOptions {
                 }
                 "--ui-dist" => {
                     index += 1;
-                    ui_dist = PathBuf::from(
-                        args.get(index)
-                            .ok_or_else(|| "--ui-dist requires a value".to_string())?,
-                    );
+                    ui_dist = args
+                        .get(index)
+                        .ok_or_else(|| "--ui-dist requires a value".to_string())?
+                        .clone();
                 }
                 "--help" | "-h" => {
                     return Err(
@@ -293,9 +300,43 @@ impl UiOptions {
         Ok(Self {
             host,
             port,
-            ui_dist,
+            ui_dist: expand_path_shorthand(&ui_dist)?,
         })
     }
+}
+
+fn expand_path_shorthand(input: &str) -> Result<PathBuf, String> {
+    let value = input.trim();
+    if value.is_empty() {
+        return Ok(PathBuf::from("."));
+    }
+    if value == "~" {
+        return home_dir().ok_or_else(|| "cannot expand '~' because HOME is not set".to_string());
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        return home_dir()
+            .map(|home| home.join(rest))
+            .ok_or_else(|| "cannot expand '~/' because HOME is not set".to_string());
+    }
+    if value == "$HOME" || value == "${HOME}" {
+        return home_dir()
+            .ok_or_else(|| "cannot expand HOME shorthand because HOME is not set".to_string());
+    }
+    if let Some(rest) = value.strip_prefix("$HOME/") {
+        return home_dir()
+            .map(|home| home.join(rest))
+            .ok_or_else(|| "cannot expand HOME shorthand because HOME is not set".to_string());
+    }
+    if let Some(rest) = value.strip_prefix("${HOME}/") {
+        return home_dir()
+            .map(|home| home.join(rest))
+            .ok_or_else(|| "cannot expand HOME shorthand because HOME is not set".to_string());
+    }
+    Ok(PathBuf::from(value))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME").map(PathBuf::from)
 }
 
 fn serve_ui(options: UiOptions) -> Result<(), String> {
@@ -469,7 +510,8 @@ fn graph_for_params(params: &[(String, String)]) -> Result<apex_core::Graph, Str
         .find(|(key, _)| key == "path")
         .map(|(_, value)| value.as_str())
         .unwrap_or(".");
-    apex_core::parse_repository(Path::new(root))
+    let root_path = expand_path_shorthand(root)?;
+    apex_core::parse_repository(&root_path)
         .map_err(|error| format!("failed to scan '{root}': {error}"))
 }
 
@@ -690,9 +732,11 @@ fn handle_rules(args: Vec<String>) -> Result<(), String> {
                 let path = args
                     .get(out_index + 1)
                     .ok_or_else(|| "--out requires a file path".to_string())?;
-                fs::write(path, rules_template())
-                    .map_err(|error| format!("failed to write '{path}': {error}"))?;
-                println!("Wrote {path}");
+                let output_path = expand_path_shorthand(path)?;
+                fs::write(&output_path, rules_template()).map_err(|error| {
+                    format!("failed to write '{}': {error}", output_path.display())
+                })?;
+                println!("Wrote {}", output_path.display());
             } else {
                 println!("{}", rules_template());
             }
@@ -756,4 +800,23 @@ fn print_help() {
     println!(
         "apex <command>\n\nCommands:\n  init\n  scan [path]\n  check [path]\n  serve [path]\n  export [format] [path] [--out file]\n  diagram [path] [--format svg|mermaid|html|json] [--out file]\n  ui [--host 127.0.0.1] [--port 4317] [--ui-dist ui/dist]"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_path_shorthand_supports_tilde() {
+        let expanded = expand_path_shorthand("~/").expect("expand ~/");
+        assert!(expanded.is_absolute());
+    }
+
+    #[test]
+    fn test_expand_path_shorthand_supports_home_env_forms() {
+        let expanded = expand_path_shorthand("$HOME").expect("expand $HOME");
+        assert!(expanded.is_absolute());
+        let expanded_braced = expand_path_shorthand("${HOME}/tmp").expect("expand ${HOME}/tmp");
+        assert!(expanded_braced.ends_with("tmp"));
+    }
 }
