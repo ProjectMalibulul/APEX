@@ -1,0 +1,8 @@
+{
+  "name": "apex-sample-repo",
+  "private": true,
+  "dependencies": {
+    "typescript": "^5.0.0"
+  }
+}
+

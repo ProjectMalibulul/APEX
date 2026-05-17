@@ -1,4 +1,11 @@
-import { checkRepository, renderDiagram, scanRepository, type DiagramFormat } from "./lib/api_client.js";
+import {
+  checkRepository,
+  listLanguages,
+  listRules,
+  renderDiagram,
+  scanRepository,
+  type DiagramFormat
+} from "./lib/api_client.js";
 import { toMermaid } from "./lib/exporters.js";
 import { graphStats, parseGraphDocument } from "./lib/graph_io.js";
 import { focusGraph } from "./lib/layout.js";
@@ -9,6 +16,8 @@ import { sampleGraph } from "./sample.js";
 const repoPath = requireElement<HTMLInputElement>("#repo-path");
 const scanButton = requireElement<HTMLButtonElement>("#scan-button");
 const checkButton = requireElement<HTMLButtonElement>("#check-button");
+const loadRulesButton = requireElement<HTMLButtonElement>("#load-rules-button");
+const loadLanguagesButton = requireElement<HTMLButtonElement>("#load-languages-button");
 const apiRenderButton = requireElement<HTMLButtonElement>("#api-render-button");
 const formatSelect = requireElement<HTMLSelectElement>("#format-select");
 const graphFile = requireElement<HTMLInputElement>("#graph-file");
@@ -21,6 +30,7 @@ const diagram = requireElement<HTMLElement>("#diagram");
 const stats = requireElement<HTMLElement>("#stats");
 const serverStatus = requireElement<HTMLElement>("#server-status");
 const mermaidOutput = requireElement<HTMLElement>("#mermaid-output");
+const outputHeading = requireElement<HTMLElement>("#output-heading");
 const errorOutput = requireElement<HTMLElement>("#error-output");
 const violations = requireElement<HTMLElement>("#violations");
 const downloadButton = requireElement<HTMLButtonElement>("#download-button");
@@ -60,6 +70,31 @@ checkButton.addEventListener("click", () => {
   });
 });
 
+loadRulesButton.addEventListener("click", () => {
+  void runAction(async () => {
+    const rules = await listRules();
+    outputHeading.textContent = "Available rules";
+    mermaidOutput.textContent = rules
+      .map(
+        (rule) =>
+          `${rule.id}\n  type: ${rule.type}\n  enabled: ${rule.enabled}\n  from: ${rule.from ?? "-"}\n  to: ${rule.to ?? "-"}`
+      )
+      .join("\n\n");
+    setStatus(`Loaded ${rules.length} rules`);
+  });
+});
+
+loadLanguagesButton.addEventListener("click", () => {
+  void runAction(async () => {
+    const languages = await listLanguages();
+    outputHeading.textContent = "Supported languages";
+    mermaidOutput.textContent = languages
+      .map((language) => `${language.name} (${language.extensions.join(", ")})\n  extracts: ${language.extracts}`)
+      .join("\n\n");
+    setStatus(`Loaded ${languages.length} language recognizers`);
+  });
+});
+
 apiRenderButton.addEventListener("click", () => {
   void runAction(async () => {
     const format = selectedFormat();
@@ -74,6 +109,7 @@ apiRenderButton.addEventListener("click", () => {
     } else {
       diagram.innerHTML = `<pre class="text-output">${escapeHtml(output)}</pre>`;
     }
+    outputHeading.textContent = `Generated ${format.toUpperCase()}`;
     mermaidOutput.textContent = output;
     setStatus(`Rendered ${format.toUpperCase()} through local API`);
   });
@@ -135,6 +171,7 @@ function render(graph: GraphDocument): void {
   currentOutputFormat = "svg";
   diagramTitle.textContent = "Interactive SVG preview";
   diagram.innerHTML = currentOutput;
+  outputHeading.textContent = "Mermaid export";
   mermaidOutput.textContent = toMermaid(graph);
 }
 
@@ -176,7 +213,16 @@ function selectedFormat(): DiagramFormat {
 }
 
 function setBusy(busy: boolean): void {
-  for (const button of [scanButton, checkButton, apiRenderButton, renderButton, sampleButton, downloadButton]) {
+  for (const button of [
+    scanButton,
+    checkButton,
+    loadRulesButton,
+    loadLanguagesButton,
+    apiRenderButton,
+    renderButton,
+    sampleButton,
+    downloadButton
+  ]) {
     button.disabled = busy;
   }
 }

@@ -27,10 +27,11 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         "check" => {
-            let root = args.next().unwrap_or_else(|| ".".to_string());
-            let graph =
-                apex_core::parse_repository(Path::new(&root)).map_err(|error| error.to_string())?;
-            let violations = apex_core::check_graph(&graph);
+            let options = CheckOptions::from_args(args.collect())?;
+            let graph = apex_core::parse_repository(Path::new(&options.root))
+                .map_err(|error| error.to_string())?;
+            let rules = load_rules_for_cli(&options.root, options.rules.as_deref())?;
+            let violations = apex_core::check_graph_with_rules(&graph, &rules);
             if violations.is_empty() {
                 println!("Apex check passed: no violations");
                 Ok(())
@@ -65,6 +66,19 @@ fn run() -> Result<(), String> {
             let options = UiOptions::from_args(args.collect())?;
             serve_ui(options)
         }
+        "rules" => handle_rules(args.collect()),
+        "languages" => {
+            print_languages();
+            Ok(())
+        }
+        "capabilities" => {
+            print_capabilities();
+            Ok(())
+        }
+        "docs" => {
+            print_docs_index();
+            Ok(())
+        }
         "--help" | "-h" | "help" => {
             print_help();
             Ok(())
@@ -94,6 +108,53 @@ fn init_workspace(root: &Path) -> io::Result<()> {
     )?;
     println!("Initialized Apex workspace");
     Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct CheckOptions {
+    root: String,
+    rules: Option<String>,
+}
+
+impl CheckOptions {
+    fn from_args(args: Vec<String>) -> Result<Self, String> {
+        let mut root = ".".to_string();
+        let mut rules = None;
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--rules" | "-r" => {
+                    index += 1;
+                    rules = Some(
+                        args.get(index)
+                            .ok_or_else(|| "--rules requires a file path".to_string())?
+                            .clone(),
+                    );
+                }
+                "--help" | "-h" => {
+                    return Err("usage: apex check [path] [--rules apex.rules.yaml]".to_string());
+                }
+                value => root = value.to_string(),
+            }
+            index += 1;
+        }
+        Ok(Self { root, rules })
+    }
+}
+
+fn load_rules_for_cli(
+    root: &str,
+    rules_path: Option<&str>,
+) -> Result<Vec<apex_core::RuleDefinition>, String> {
+    let path = rules_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(root).join("apex.rules.yaml"));
+    if path.exists() {
+        apex_core::load_rules(&path)
+            .map_err(|error| format!("failed to load '{}': {error}", path.display()))
+    } else {
+        Ok(apex_core::default_rules())
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -330,6 +391,16 @@ fn handle_api_route(target: &str) -> HttpResponse {
             content_type: "application/json; charset=utf-8",
             body: violations_to_json(&apex_core::check_graph(&graph)),
         }),
+        "/api/rules" => HttpResponse {
+            status: 200,
+            content_type: "application/json; charset=utf-8",
+            body: rules_to_json(&apex_core::default_rules()),
+        },
+        "/api/languages" => HttpResponse {
+            status: 200,
+            content_type: "application/json; charset=utf-8",
+            body: languages_to_json(),
+        },
         "/api/diagram" => {
             let params = parse_query(query);
             let format = params
@@ -519,6 +590,55 @@ fn violations_to_json(violations: &[apex_core::Violation]) -> String {
     body
 }
 
+fn rules_to_json(rules: &[apex_core::RuleDefinition]) -> String {
+    let mut body = String::from("[");
+    for (index, rule) in rules.iter().enumerate() {
+        if index > 0 {
+            body.push(',');
+        }
+        body.push_str(&format!(
+            "{{\"id\":\"{}\",\"type\":\"{}\",\"from\":{},\"to\":{},\"enabled\":{}}}",
+            escape_json(&rule.id),
+            escape_json(&rule.rule_type),
+            optional_json(rule.from.as_deref()),
+            optional_json(rule.to.as_deref()),
+            rule.enabled
+        ));
+    }
+    body.push(']');
+    body
+}
+
+fn languages_to_json() -> String {
+    let languages = apex_core::supported_languages();
+    let mut body = String::from("[");
+    for (index, language) in languages.iter().enumerate() {
+        if index > 0 {
+            body.push(',');
+        }
+        let extensions = language
+            .extensions
+            .iter()
+            .map(|extension| format!("\"{}\"", escape_json(extension)))
+            .collect::<Vec<_>>()
+            .join(",");
+        body.push_str(&format!(
+            "{{\"name\":\"{}\",\"extensions\":[{}],\"extracts\":\"{}\"}}",
+            escape_json(language.name),
+            extensions,
+            escape_json(language.extracts)
+        ));
+    }
+    body.push(']');
+    body
+}
+
+fn optional_json(value: Option<&str>) -> String {
+    value
+        .map(|value| format!("\"{}\"", escape_json(value)))
+        .unwrap_or_else(|| "null".to_string())
+}
+
 fn graph_to_html(graph: &apex_core::Graph) -> String {
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Apex Diagram</title><style>{}</style></head><body><main><header><h1>Apex Diagram</h1><p>{} nodes · {} edges</p></header><section class=\"diagram\">{}</section><details><summary>Graph JSON</summary><pre>{}</pre></details></main></body></html>",
@@ -543,6 +663,83 @@ fn escape_html(value: &str) -> String {
 
 fn is_format(value: &str) -> bool {
     matches!(value, "svg" | "mermaid" | "html" | "json")
+}
+
+fn handle_rules(args: Vec<String>) -> Result<(), String> {
+    match args.first().map(String::as_str).unwrap_or("list") {
+        "list" => {
+            for rule in apex_core::default_rules() {
+                println!(
+                    "{} ({}) enabled={} from={} to={}",
+                    rule.id,
+                    rule.rule_type,
+                    rule.enabled,
+                    rule.from.as_deref().unwrap_or("-"),
+                    rule.to.as_deref().unwrap_or("-")
+                );
+            }
+            Ok(())
+        }
+        "explain" => {
+            let id = args.get(1).map(String::as_str).unwrap_or("");
+            print_rule_explanation(id);
+            Ok(())
+        }
+        "template" => {
+            if let Some(out_index) = args.iter().position(|arg| arg == "--out" || arg == "-o") {
+                let path = args
+                    .get(out_index + 1)
+                    .ok_or_else(|| "--out requires a file path".to_string())?;
+                fs::write(path, rules_template())
+                    .map_err(|error| format!("failed to write '{path}': {error}"))?;
+                println!("Wrote {path}");
+            } else {
+                println!("{}", rules_template());
+            }
+            Ok(())
+        }
+        "--help" | "-h" | "help" => {
+            println!("apex rules <list|explain|template> [--out apex.rules.yaml]");
+            Ok(())
+        }
+        other => Err(format!("unknown rules command '{other}'")),
+    }
+}
+
+fn print_rule_explanation(id: &str) {
+    match id {
+        "RULE-LAYER-001" | "forbidden_import" => println!(
+            "RULE-LAYER-001 prevents one architectural layer from importing another. Configure it with type: forbidden_import, from: <layer>, to: <layer>."
+        ),
+        "RULE-CYCLE-001" | "import_cycle" => println!(
+            "RULE-CYCLE-001 detects import cycles in the parsed dependency graph. Configure it with type: import_cycle."
+        ),
+        _ => println!("Known rules: RULE-LAYER-001, RULE-CYCLE-001"),
+    }
+}
+
+fn rules_template() -> &'static str {
+    "version: 1\nrules:\n  - id: RULE-LAYER-001\n    type: forbidden_import\n    from: api\n    to: infrastructure\n    enabled: true\n  - id: RULE-CYCLE-001\n    type: import_cycle\n    enabled: true\n"
+}
+
+fn print_languages() {
+    println!("Supported languages and file types:");
+    for language in apex_core::supported_languages() {
+        println!(
+            "- {} ({}) — {}",
+            language.name,
+            language.extensions.join(", "),
+            language.extracts
+        );
+    }
+}
+
+fn print_capabilities() {
+    println!("Apex can scan repositories, build architecture graphs, check rules, generate SVG/Mermaid/HTML/JSON diagrams, run a local UI, and expose VS Code rendering integration.");
+}
+
+fn print_docs_index() {
+    println!("User docs live in ./docs:\n- docs/getting-started.md\n- docs/cli.md\n- docs/ui.md\n- docs/rules.md\n- docs/languages.md\n- docs/diagrams.md\n- docs/configuration.md\n- docs/vscode.md\n- docs/troubleshooting.md");
 }
 
 fn write_if_missing(path: PathBuf, content: &str) -> io::Result<()> {

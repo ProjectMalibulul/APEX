@@ -45,6 +45,8 @@ ui-smoke:
     for attempt in {1..30}; do curl -fsSL http://127.0.0.1:4322/api/health >/tmp/apex-ui-health.json && break || sleep 0.2; done
     curl -fsSL "http://127.0.0.1:4322/api/scan?path={{justfile_directory()}}/test-fixtures/sample-repo" | grep -q "UserService"
     curl -fsSL "http://127.0.0.1:4322/api/check?path={{justfile_directory()}}/test-fixtures/sample-repo" | grep -q "RULE-LAYER-001"
+    curl -fsSL "http://127.0.0.1:4322/api/rules" | grep -q "RULE-LAYER-001"
+    curl -fsSL "http://127.0.0.1:4322/api/languages" | grep -q "Kotlin"
     curl -fsSL "http://127.0.0.1:4322/api/diagram?path={{justfile_directory()}}/test-fixtures/sample-repo&format=svg" | grep -q "<svg"
     curl -fsSL http://127.0.0.1:4322/ | grep -q "Apex Workbench"
 
@@ -57,6 +59,8 @@ smoke:
     rm -rf /tmp/apex-smoke && mkdir -p /tmp/apex-smoke
     cd /tmp/apex-smoke && {{justfile_directory()}}/target/debug/apex init && {{justfile_directory()}}/target/debug/apex serve
     {{justfile_directory()}}/target/debug/apex scan {{justfile_directory()}}/test-fixtures/sample-repo > /tmp/apex-scan.json
+    {{justfile_directory()}}/target/debug/apex languages | grep -q "Rust"
+    {{justfile_directory()}}/target/debug/apex rules list | grep -q "RULE-LAYER-001"
     if {{justfile_directory()}}/target/debug/apex check {{justfile_directory()}}/test-fixtures/sample-repo > /tmp/apex-check.txt 2>&1; then echo "expected rule violation was not detected" >&2; exit 1; fi
     grep -q "RULE-LAYER-001" /tmp/apex-check.txt
     grep -q "UserService" /tmp/apex-scan.json
@@ -65,4 +69,4 @@ smoke:
 verify: fmt build test lint diagram smoke ui-smoke
 
 clean-generated:
-    rm -rf artifacts dist target node_modules docs/*_latest.txt
+    rm -rf artifacts dist target node_modules .state/*_latest.txt

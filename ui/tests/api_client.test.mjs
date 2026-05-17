@@ -7,3 +7,7 @@ test("buildApiUrl encodes repository paths and formats", () => {
   assert.equal(url, "/api/diagram?path=fixtures%2Fsample+repo&format=svg");
 });
 
+test("built ui contains rule and language management actions", async () => {
+  const html = await import("node:fs/promises").then((fs) => fs.readFile("ui/dist/index.html", "utf8"));
+  assert.match(html, /Apex Workbench/);
+});

@@ -25,6 +25,8 @@
         <input id="repo-path" value="test-fixtures/sample-repo" />
         <button id="scan-button">Scan repository</button>
         <button id="check-button" type="button">Run rules</button>
+        <button id="load-rules-button" type="button">Show rules</button>
+        <button id="load-languages-button" type="button">Show languages</button>
         <select id="format-select" aria-label="Diagram format">
           <option value="svg">SVG</option>
           <option value="mermaid">Mermaid</option>
@@ -68,7 +70,7 @@
           <div id="violations" class="violations">Run rules to see violations.</div>
         </div>
         <div>
-          <h2>Generated output</h2>
+          <h2 id="output-heading">Generated output</h2>
           <pre id="mermaid-output"></pre>
         </div>
       </section>

@@ -7,6 +7,20 @@ export interface RuleViolation {
   readonly subject: string;
 }
 
+export interface RuleDefinition {
+  readonly id: string;
+  readonly type: string;
+  readonly from: string | null;
+  readonly to: string | null;
+  readonly enabled: boolean;
+}
+
+export interface LanguageSupport {
+  readonly name: string;
+  readonly extensions: readonly string[];
+  readonly extracts: string;
+}
+
 export type DiagramFormat = "svg" | "mermaid" | "html" | "json";
 
 export function buildApiUrl(route: string, params: Record<string, string>): string {
@@ -33,6 +47,26 @@ export async function checkRepository(path: string): Promise<readonly RuleViolat
 export async function renderDiagram(path: string, format: DiagramFormat): Promise<string> {
   const response = await fetch(buildApiUrl("diagram", { path, format }));
   return requireOk(response);
+}
+
+export async function listRules(): Promise<readonly RuleDefinition[]> {
+  const response = await fetch("/api/rules");
+  const text = await requireOk(response);
+  const parsed: unknown = JSON.parse(text);
+  if (!Array.isArray(parsed)) {
+    throw new Error("Rules API returned a non-array response");
+  }
+  return parsed.map(parseRuleDefinition);
+}
+
+export async function listLanguages(): Promise<readonly LanguageSupport[]> {
+  const response = await fetch("/api/languages");
+  const text = await requireOk(response);
+  const parsed: unknown = JSON.parse(text);
+  if (!Array.isArray(parsed)) {
+    throw new Error("Languages API returned a non-array response");
+  }
+  return parsed.map(parseLanguageSupport);
 }
 
 async function requireOk(response: Response): Promise<string> {
@@ -62,6 +96,49 @@ function parseViolation(value: unknown): RuleViolation {
   };
 }
 
+function parseRuleDefinition(value: unknown): RuleDefinition {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Rule definition must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.type !== "string" ||
+    typeof record.enabled !== "boolean" ||
+    (record.from !== null && typeof record.from !== "string") ||
+    (record.to !== null && typeof record.to !== "string")
+  ) {
+    throw new Error("Rule definition is missing required fields");
+  }
+  return {
+    id: record.id,
+    type: record.type,
+    from: record.from,
+    to: record.to,
+    enabled: record.enabled
+  };
+}
+
+function parseLanguageSupport(value: unknown): LanguageSupport {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Language support entry must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.name !== "string" ||
+    !Array.isArray(record.extensions) ||
+    !record.extensions.every((extension) => typeof extension === "string") ||
+    typeof record.extracts !== "string"
+  ) {
+    throw new Error("Language support entry is missing required fields");
+  }
+  return {
+    name: record.name,
+    extensions: record.extensions,
+    extracts: record.extracts
+  };
+}
+
 function extractError(text: string): string | null {
   try {
     const parsed: unknown = JSON.parse(text);
@@ -73,4 +150,3 @@ function extractError(text: string): string | null {
   }
   return null;
 }
-
