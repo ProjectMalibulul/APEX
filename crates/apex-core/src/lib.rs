@@ -373,14 +373,18 @@ pub fn parse_repository(root: &Path) -> io::Result<Graph> {
     let mut graph = Graph::new();
     let mut files = Vec::new();
     collect_files(root, &mut files)?;
+    files.sort();
     for path in &files {
         let ext = path
             .extension()
             .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
             .unwrap_or_default();
-        let content = fs::read_to_string(path)?;
+        let Some(content) = read_source_text(path)? else {
+            continue;
+        };
         let relative = relative_path(root, path);
-        match ext {
+        match ext.as_str() {
             "ts" | "tsx" | "js" | "jsx" => parse_typescript(&mut graph, &relative, &content),
             "py" => parse_python(&mut graph, &relative, &content),
             "java" => parse_java(&mut graph, &relative, &content),
@@ -589,7 +593,9 @@ pub fn check_graph_with_rules(graph: &Graph, rules: &[RuleDefinition]) -> Vec<Vi
 
 fn collect_files(root: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
     if root.is_file() {
-        out.push(root.to_path_buf());
+        if is_parseable_path(root) {
+            out.push(root.to_path_buf());
+        }
         return Ok(());
     }
     for entry in fs::read_dir(root)? {
@@ -602,11 +608,50 @@ fn collect_files(root: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
         }
         if path.is_dir() {
             collect_files(&path, out)?;
-        } else {
+        } else if is_parseable_path(&path) {
             out.push(path);
         }
     }
     Ok(())
+}
+
+fn is_parseable_path(path: &Path) -> bool {
+    let file_name = path.file_name().and_then(|value| value.to_str());
+    if matches!(file_name, Some("go.mod" | "pom.xml" | "build.gradle")) {
+        return true;
+    }
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "ts" | "tsx"
+                | "js"
+                | "jsx"
+                | "py"
+                | "java"
+                | "go"
+                | "rs"
+                | "kt"
+                | "kts"
+                | "cs"
+                | "prisma"
+                | "sql"
+                | "json"
+                | "toml"
+                | "yaml"
+                | "yml"
+        )
+    )
+}
+
+fn read_source_text(path: &Path) -> io::Result<Option<String>> {
+    let bytes = fs::read(path)?;
+    if bytes.iter().take(4096).any(|byte| *byte == 0) {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 fn parse_typescript(graph: &mut Graph, path: &str, content: &str) {
@@ -1445,6 +1490,53 @@ mod tests {
             .edges
             .iter()
             .any(|edge| edge.from.starts_with("file:") && matches!(edge.kind, EdgeKind::Imports)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_parse_repository_ignores_binary_non_source_files() {
+        let root = std::env::temp_dir().join(format!("apex-binary-skip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("lib")).expect("create temp dirs");
+        fs::write(
+            root.join("UserService.java"),
+            "package app;\n\nclass UserService {}\n",
+        )
+        .expect("write java fixture");
+        fs::write(root.join("archive.zip"), [0x50, 0x4b, 0x99, 0x00]).expect("write zip");
+        fs::write(
+            root.join("lib").join("dependency.jar"),
+            [0xca, 0xfe, 0xba, 0xbe],
+        )
+        .expect("write jar");
+        fs::write(root.join("diagram.png"), [0x89, b'P', b'N', b'G']).expect("write png");
+
+        let graph = parse_repository(&root).expect("binary sidecars should not fail scan");
+
+        assert!(graph.nodes.contains_key("type:UserService"));
+        assert!(!graph.nodes.contains_key("file:archive.zip"));
+        assert!(!graph.nodes.contains_key("file:lib/dependency.jar"));
+        assert!(!graph.nodes.contains_key("file:diagram.png"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_parse_repository_tolerates_non_utf8_source_bytes() {
+        let root = std::env::temp_dir().join(format!("apex-lossy-source-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create temp dir");
+        fs::write(
+            root.join("Legacy.java"),
+            [
+                b'c', b'l', b'a', b's', b's', b' ', b'L', b'e', b'g', b'a', b'c', b'y', b' ', b'{',
+                b' ', 0xff, b' ', b'}',
+            ],
+        )
+        .expect("write legacy java fixture");
+
+        let graph = parse_repository(&root).expect("legacy source encoding should not fail scan");
+
+        assert!(graph.nodes.contains_key("type:Legacy"));
         let _ = fs::remove_dir_all(root);
     }
 
