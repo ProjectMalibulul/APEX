@@ -10,6 +10,7 @@ Use these docs when you want to run Apex, configure it, add rules, understand su
 | [Rules guide](rules.md) | How to add and manage architecture rules |
 | [Language support](languages.md) | Supported file types and extracted graph data |
 | [Diagram generation](diagrams.md) | SVG, Mermaid, HTML, and JSON outputs |
+| [Metrics](metrics.md) | Hotspots, cycles, components, layer mix, orphans |
 | [Configuration](configuration.md) | `apex.workspace.yaml`, `apex.rules.yaml`, lenses, and overrides |
 | [VS Code integration](vscode.md) | Current extension integration surface and smoke checks |
 | [Troubleshooting](troubleshooting.md) | Common failures and fixes |

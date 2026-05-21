@@ -10,15 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          components: rustfmt, clippy
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: stable
       - uses: extractions/setup-just@v2
       - run: npm ci
       - run: just verify
+

@@ -180,26 +180,109 @@ button[type="button"] {
 }
 
 .canvas {
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   min-height: 560px;
-  padding: 24px;
+  padding: 16px;
   background:
     radial-gradient(circle at top left, rgb(31 111 235 / 0.25), transparent 28rem),
     #0d1117;
 }
 
-.diagram {
-  min-width: 760px;
-  min-height: 420px;
-  padding: 24px;
+.zoom-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.zoom-controls button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #1f2937;
+  color: #e6edf3;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.zoom-controls button[id="download-button"] {
+  background: #1f6feb;
+}
+
+.diagram-viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
   border-radius: 16px;
   background: #f7fbff;
-  color: #0d1117;
+  cursor: grab;
+  touch-action: none;
+  min-height: 480px;
+}
+
+.diagram-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.diagram {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .diagram svg {
   display: block;
-  min-width: 720px;
+  width: 100%;
+  height: 100%;
+}
+
+.metrics-panel {
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #070b12;
+  color: #e6edf3;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+
+.metrics-panel h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: #a5d6ff;
+}
+
+.metrics-panel ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.metrics-panel .metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.metrics-panel .metric-card {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #111827;
+}
+
+.metrics-panel .metric-card span {
+  display: block;
+  color: #9da7b3;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.metrics-panel .metric-card strong {
+  font-size: 1.1rem;
+  color: #79c0ff;
 }
 
 .error {

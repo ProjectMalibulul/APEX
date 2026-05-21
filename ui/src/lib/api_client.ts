@@ -21,6 +21,27 @@ export interface LanguageSupport {
   readonly extracts: string;
 }
 
+export interface GraphMetrics {
+  readonly node_count: number;
+  readonly edge_count: number;
+  readonly component_count: number;
+  readonly hotspots: readonly { id: string; name: string; fan_in: number; fan_out: number }[];
+  readonly cycles: readonly (readonly string[])[];
+  readonly orphans: readonly string[];
+  readonly layer_mix: Record<string, number>;
+  readonly layer_edges: Record<string, number>;
+}
+
+export async function getMetrics(path: string): Promise<GraphMetrics> {
+  const response = await fetch(buildApiUrl("metrics", { path }));
+  const text = await requireOk(response);
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("Metrics API returned a non-object response");
+  }
+  return parsed as GraphMetrics;
+}
+
 export type DiagramFormat = "svg" | "mermaid" | "html" | "json";
 
 export function buildApiUrl(route: string, params: Record<string, string>): string {

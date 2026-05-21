@@ -1,0 +1,114 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            archive: tar.gz
+          - label: linux-aarch64
+            os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            archive: tar.gz
+          - label: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            cross: false
+            archive: tar.gz
+          - label: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            cross: false
+            archive: tar.gz
+          - label: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build UI
+        run: npm run build
+
+      - name: Build (native)
+        if: matrix.cross == false
+        run: cargo build --release --locked --target ${{ matrix.target }} -p apex-cli
+
+      - name: Build (cross)
+        if: matrix.cross == true
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: "--release --locked -p apex-cli"
+
+      - name: Stage release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          stage="apex-${version}-${{ matrix.label }}"
+          mkdir -p "$stage/ui-dist"
+          if [[ "${{ matrix.os }}" == windows-* ]]; then
+            cp "target/${{ matrix.target }}/release/apex.exe" "$stage/"
+          else
+            cp "target/${{ matrix.target }}/release/apex" "$stage/"
+          fi
+          cp README.md LICENSE "$stage/" 2>/dev/null || true
+          cp -R ui/dist "$stage/ui-dist/" 2>/dev/null || true
+          cp -R docs "$stage/" 2>/dev/null || true
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            7z a -r "${stage}.zip" "$stage" >/dev/null
+            echo "ASSET=${stage}.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "${stage}.tar.gz" "$stage"
+            echo "ASSET=${stage}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload to release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          fail_on_unmatched_files: true
+
+      - name: Upload artifact
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: ${{ env.ASSET }}

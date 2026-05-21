@@ -45,10 +45,23 @@ ui-smoke:
     for attempt in {1..30}; do curl -fsSL http://127.0.0.1:4322/api/health >/tmp/apex-ui-health.json && break || sleep 0.2; done
     curl -fsSL "http://127.0.0.1:4322/api/scan?path={{justfile_directory()}}/test-fixtures/sample-repo" | grep -q "UserService"
     curl -fsSL "http://127.0.0.1:4322/api/check?path={{justfile_directory()}}/test-fixtures/sample-repo" | grep -q "RULE-LAYER-001"
+    curl -fsSL "http://127.0.0.1:4322/api/metrics?path={{justfile_directory()}}/test-fixtures/sample-repo" | grep -q "hotspots"
     curl -fsSL "http://127.0.0.1:4322/api/rules" | grep -q "RULE-LAYER-001"
     curl -fsSL "http://127.0.0.1:4322/api/languages" | grep -q "Kotlin"
     curl -fsSL "http://127.0.0.1:4322/api/diagram?path={{justfile_directory()}}/test-fixtures/sample-repo&format=svg" | grep -q "<svg"
     curl -fsSL http://127.0.0.1:4322/ | grep -q "Apex Workbench"
+
+metrics target="test-fixtures/sample-repo":
+    cargo run -q -p apex-cli -- metrics {{target}}
+
+release-local target="test-fixtures/sample-repo":
+    cargo build --release -p apex-cli
+    npm run build
+    mkdir -p artifacts/local-release
+    cp target/release/apex artifacts/local-release/ 2>/dev/null || cp target/release/apex.exe artifacts/local-release/
+    cp -R ui/dist artifacts/local-release/ui-dist
+    cp README.md LICENSE artifacts/local-release/ 2>/dev/null || true
+    cp -R docs artifacts/local-release/ 2>/dev/null || true
 
 vscode-smoke:
     cargo build -p apex-cli

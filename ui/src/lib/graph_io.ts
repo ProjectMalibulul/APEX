@@ -31,7 +31,7 @@ function parseNode(value: unknown): GraphNode {
   if (!isRecord(value)) {
     throw new Error("Graph node must be an object");
   }
-  const { id, name, kind, path, layer } = value;
+  const { id, name, kind, path, layer, members } = value;
   if (typeof id !== "string" || typeof name !== "string" || typeof kind !== "string" || typeof path !== "string") {
     throw new Error("Graph node is missing required string fields");
   }
@@ -41,7 +41,26 @@ function parseNode(value: unknown): GraphNode {
   if (layer !== null && typeof layer !== "string") {
     throw new Error("Graph node layer must be a string or null");
   }
-  return { id, name, kind: kind as GraphNode["kind"], path, layer };
+  const parsedMembers = Array.isArray(members) ? members.map(parseMember) : undefined;
+  return { id, name, kind: kind as GraphNode["kind"], path, layer, members: parsedMembers };
+}
+
+function parseMember(value: unknown): { name: string; kind: "field" | "method" | "constructor"; visibility?: string } {
+  if (!isRecord(value)) {
+    throw new Error("Graph member must be an object");
+  }
+  const { name, kind, visibility } = value;
+  if (typeof name !== "string" || typeof kind !== "string") {
+    throw new Error("Graph member is missing required fields");
+  }
+  if (kind !== "field" && kind !== "method" && kind !== "constructor") {
+    throw new Error(`Unsupported graph member kind '${kind}'`);
+  }
+  return {
+    name,
+    kind,
+    visibility: typeof visibility === "string" ? visibility : undefined
+  };
 }
 
 function parseEdge(value: unknown): GraphEdge {

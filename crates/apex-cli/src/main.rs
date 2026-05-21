@@ -70,6 +70,19 @@ fn run() -> Result<(), String> {
             serve_ui(options)
         }
         "rules" => handle_rules(args.collect()),
+        "metrics" => {
+            let options = MetricsOptions::from_args(args.collect())?;
+            let root_path = expand_path_shorthand(&options.root)?;
+            let graph =
+                apex_core::parse_repository(&root_path).map_err(|error| error.to_string())?;
+            let metrics = apex_core::compute_metrics(&graph);
+            if options.format == "json" {
+                println!("{}", apex_core::metrics_to_json(&metrics));
+            } else {
+                print_metrics_text(&metrics);
+            }
+            Ok(())
+        }
         "languages" => {
             print_languages();
             Ok(())
@@ -158,6 +171,77 @@ fn load_rules_for_cli(
             .map_err(|error| format!("failed to load '{}': {error}", path.display()))
     } else {
         Ok(apex_core::default_rules())
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct MetricsOptions {
+    root: String,
+    format: String,
+}
+
+impl MetricsOptions {
+    fn from_args(args: Vec<String>) -> Result<Self, String> {
+        let mut root = ".".to_string();
+        let mut format = "text".to_string();
+        let mut index = 0;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--format" | "-f" => {
+                    index += 1;
+                    format = args
+                        .get(index)
+                        .ok_or_else(|| "--format requires a value".to_string())?
+                        .clone();
+                }
+                "--help" | "-h" => {
+                    return Err("usage: apex metrics [path] [--format text|json]".to_string());
+                }
+                value => root = value.to_string(),
+            }
+            index += 1;
+        }
+        if format != "text" && format != "json" {
+            return Err(format!("unsupported metrics format '{format}'"));
+        }
+        Ok(Self { root, format })
+    }
+}
+
+fn print_metrics_text(metrics: &apex_core::GraphMetrics) {
+    println!("nodes:      {}", metrics.node_count);
+    println!("edges:      {}", metrics.edge_count);
+    println!("components: {}", metrics.component_count);
+    println!("cycles:     {}", metrics.cycles.len());
+    if !metrics.layer_mix.is_empty() {
+        println!("\nlayers:");
+        for (layer, count) in &metrics.layer_mix {
+            println!("  {layer:<16} {count}");
+        }
+    }
+    if !metrics.layer_edges.is_empty() {
+        println!("\nlayer edges:");
+        for ((from, to), count) in &metrics.layer_edges {
+            println!("  {from} -> {to}  ({count})");
+        }
+    }
+    if !metrics.hotspots.is_empty() {
+        println!("\nhotspots (fan_in / fan_out):");
+        for hot in &metrics.hotspots {
+            println!("  {:<32} in={} out={}", hot.name, hot.fan_in, hot.fan_out);
+        }
+    }
+    if !metrics.cycles.is_empty() {
+        println!("\nimport cycles:");
+        for (i, cycle) in metrics.cycles.iter().enumerate() {
+            println!("  {}. {}", i + 1, cycle.join(" -> "));
+        }
+    }
+    if !metrics.orphans.is_empty() {
+        println!("\norphans (disconnected types): {}", metrics.orphans.len());
+        for id in metrics.orphans.iter().take(20) {
+            println!("  {id}");
+        }
     }
 }
 
@@ -432,6 +516,13 @@ fn handle_api_route(target: &str) -> HttpResponse {
             content_type: "application/json; charset=utf-8",
             body: violations_to_json(&apex_core::check_graph(&graph)),
         }),
+        "/api/metrics" => {
+            graph_for_query(query).map_or_else(error_response, |graph| HttpResponse {
+                status: 200,
+                content_type: "application/json; charset=utf-8",
+                body: apex_core::metrics_to_json(&apex_core::compute_metrics(&graph)),
+            })
+        }
         "/api/rules" => HttpResponse {
             status: 200,
             content_type: "application/json; charset=utf-8",
@@ -798,7 +889,7 @@ fn write_if_missing(path: PathBuf, content: &str) -> io::Result<()> {
 
 fn print_help() {
     println!(
-        "apex <command>\n\nCommands:\n  init\n  scan [path]\n  check [path]\n  serve [path]\n  export [format] [path] [--out file]\n  diagram [path] [--format svg|mermaid|html|json] [--out file]\n  ui [--host 127.0.0.1] [--port 4317] [--ui-dist ui/dist]"
+        "apex <command>\n\nCommands:\n  init\n  scan [path]\n  check [path] [--rules apex.rules.yaml]\n  metrics [path] [--format text|json]\n  serve [path]\n  export [format] [path] [--out file]\n  diagram [path] [--format svg|mermaid|html|json] [--out file]\n  ui [--host 127.0.0.1] [--port 4317] [--ui-dist ui/dist]\n  rules <list|explain|template>\n  languages\n  capabilities\n  docs\n  help"
     );
 }
 

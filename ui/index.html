@@ -58,9 +58,19 @@
         <section class="canvas">
           <div class="canvas-toolbar">
             <span id="diagram-title">Interactive SVG preview</span>
-            <button id="download-button" type="button">Download current output</button>
+            <div class="zoom-controls" role="toolbar" aria-label="Diagram zoom">
+              <button id="zoom-out" type="button" title="Zoom out">−</button>
+              <button id="zoom-in" type="button" title="Zoom in">+</button>
+              <button id="zoom-fit" type="button" title="Fit to view">Fit</button>
+              <button id="zoom-reset" type="button" title="Reset">1:1</button>
+              <button id="metrics-button" type="button" title="Compute metrics">Metrics</button>
+              <button id="download-button" type="button">Download</button>
+            </div>
           </div>
-          <div id="diagram" class="diagram"></div>
+          <div id="diagram-viewport" class="diagram-viewport">
+            <div id="diagram" class="diagram"></div>
+          </div>
+          <div id="metrics-panel" class="metrics-panel" hidden></div>
         </section>
       </section>
 

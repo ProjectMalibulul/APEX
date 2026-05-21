@@ -43,6 +43,10 @@ Writes a starter rules file.
 
 Generates a diagram or graph file locally.
 
+## `apex metrics [path] [--format text|json]`
+
+Computes architectural metrics — hotspots, cycles, components, layer mix, orphans — and prints them as plain text or JSON. See [docs/metrics.md](metrics.md) for field reference.
+
 ## `apex ui [--host 127.0.0.1] [--port 4317]`
 
 Serves the Vite-built Apex workbench and local API routes.
