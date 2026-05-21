@@ -9,6 +9,7 @@ members = [
   "crates/apex-plugin",
   "crates/apexd",
   "crates/apex-cli",
+  "crates/apex-ui",
 ]
 resolver = "2"
 

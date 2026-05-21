@@ -1,0 +1,15 @@
+[package]
+name = "apex-ui"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+description = "Apex architecture analyser – self-contained UI launcher (all assets embedded)"
+
+[[bin]]
+name = "apex-ui"
+path = "src/main.rs"
+
+[dependencies]
+apex-core = { path = "../apex-core" }
+rust-embed = { version = "8", features = ["mime-guess"] }
+open = "5"

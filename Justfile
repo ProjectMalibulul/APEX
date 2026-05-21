@@ -14,6 +14,14 @@ build:
     cargo build --workspace
     npm run build
 
+# Build both release binaries with embedded UI assets
+build-release:
+    npm run build:ui
+    cargo build --release -p apex-cli
+    cargo build --release -p apex-ui
+    @echo "apex  → target/release/apex"
+    @echo "apex-ui → target/release/apex-ui  (self-contained, opens browser)"
+
 test:
     cargo test --workspace
     npm test
@@ -55,13 +63,15 @@ metrics target="test-fixtures/sample-repo":
     cargo run -q -p apex-cli -- metrics {{target}}
 
 release-local target="test-fixtures/sample-repo":
+    npm run build:ui
     cargo build --release -p apex-cli
-    npm run build
+    cargo build --release -p apex-ui
     mkdir -p artifacts/local-release
     cp target/release/apex artifacts/local-release/ 2>/dev/null || cp target/release/apex.exe artifacts/local-release/
-    cp -R ui/dist artifacts/local-release/ui-dist
+    cp target/release/apex-ui artifacts/local-release/ 2>/dev/null || cp target/release/apex-ui.exe artifacts/local-release/
     cp README.md LICENSE artifacts/local-release/ 2>/dev/null || true
     cp -R docs artifacts/local-release/ 2>/dev/null || true
+    @echo "Local release ready in artifacts/local-release/"
 
 vscode-smoke:
     cargo build -p apex-cli

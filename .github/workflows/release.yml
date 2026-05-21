@@ -4,11 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v0.1.0)"
-        required: true
 
 permissions:
   contents: write
@@ -26,26 +21,36 @@ jobs:
             target: x86_64-unknown-linux-gnu
             cross: false
             archive: tar.gz
+            bin_suffix: ""
+
           - label: linux-aarch64
             os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             cross: true
             archive: tar.gz
+            bin_suffix: ""
+
           - label: macos-x86_64
             os: macos-13
             target: x86_64-apple-darwin
             cross: false
             archive: tar.gz
+            bin_suffix: ""
+
           - label: macos-aarch64
             os: macos-14
             target: aarch64-apple-darwin
             cross: false
             archive: tar.gz
+            bin_suffix: ""
+
           - label: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             cross: false
             archive: zip
+            bin_suffix: ".exe"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -59,16 +64,24 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # UI must be built BEFORE apex-ui so rust-embed can bake in the assets.
+      - name: Install npm deps
+        run: npm ci
 
       - name: Build UI
-        run: npm run build
+        run: npm run build:ui
 
-      - name: Build (native)
+      # ── Native builds ────────────────────────────────────────────────────
+      - name: Build apex (native)
         if: matrix.cross == false
         run: cargo build --release --locked --target ${{ matrix.target }} -p apex-cli
 
-      - name: Build (cross)
+      - name: Build apex-ui (native)
+        if: matrix.cross == false
+        run: cargo build --release --locked --target ${{ matrix.target }} -p apex-ui
+
+      # ── Cross builds (linux-aarch64 only) ────────────────────────────────
+      - name: Build apex (cross)
         if: matrix.cross == true
         uses: houseabsolute/actions-rust-cross@v1
         with:
@@ -76,39 +89,46 @@ jobs:
           target: ${{ matrix.target }}
           args: "--release --locked -p apex-cli"
 
+      - name: Build apex-ui (cross)
+        if: matrix.cross == true
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: "--release --locked -p apex-ui"
+
+      # ── Package ──────────────────────────────────────────────────────────
       - name: Stage release artifacts
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          stage="apex-${version}-${{ matrix.label }}"
-          mkdir -p "$stage/ui-dist"
-          if [[ "${{ matrix.os }}" == windows-* ]]; then
-            cp "target/${{ matrix.target }}/release/apex.exe" "$stage/"
-          else
-            cp "target/${{ matrix.target }}/release/apex" "$stage/"
-          fi
-          cp README.md LICENSE "$stage/" 2>/dev/null || true
-          cp -R ui/dist "$stage/ui-dist/" 2>/dev/null || true
-          cp -R docs "$stage/" 2>/dev/null || true
+          TAG="${GITHUB_REF_NAME}"
+          STAGE="apex-${TAG}-${{ matrix.label }}"
+          mkdir -p "$STAGE"
+
+          # CLI binary
+          cp "target/${{ matrix.target }}/release/apex${{ matrix.bin_suffix }}" "$STAGE/"
+
+          # Self-contained UI binary (assets embedded, opens browser)
+          cp "target/${{ matrix.target }}/release/apex-ui${{ matrix.bin_suffix }}" "$STAGE/"
+
+          # Docs and metadata
+          cp README.md "$STAGE/" 2>/dev/null || true
+          cp LICENSE   "$STAGE/" 2>/dev/null || true
+          cp -R docs   "$STAGE/" 2>/dev/null || true
+
           if [[ "${{ matrix.archive }}" == "zip" ]]; then
-            7z a -r "${stage}.zip" "$stage" >/dev/null
-            echo "ASSET=${stage}.zip" >> "$GITHUB_ENV"
+            7z a -r "${STAGE}.zip" "$STAGE" >/dev/null
+            echo "ASSET=${STAGE}.zip" >> "$GITHUB_ENV"
           else
-            tar -czf "${stage}.tar.gz" "$stage"
-            echo "ASSET=${stage}.tar.gz" >> "$GITHUB_ENV"
+            tar -czf "${STAGE}.tar.gz" "$STAGE"
+            echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"
           fi
 
-      - name: Upload to release
-        if: github.event_name == 'push'
+      - name: Create GitHub release and upload asset
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.ASSET }}
           fail_on_unmatched_files: true
+          generate_release_notes: true
 
-      - name: Upload artifact
-        if: github.event_name != 'push'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.label }}
-          path: ${{ env.ASSET }}
