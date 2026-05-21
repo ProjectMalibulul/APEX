@@ -23,5 +23,7 @@ jobs:
           go-version: stable
       - uses: extractions/setup-just@v2
       - run: npm ci
+      - name: Build UI (needed before cargo so rust-embed can embed assets)
+        run: npm run build:ui
       - run: just verify
 

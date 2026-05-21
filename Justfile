@@ -11,8 +11,9 @@ fmt:
     gofmt -w collab/*.go
 
 build:
+    npm run build:ui
     cargo build --workspace
-    npm run build
+    npm run build:types
 
 # Build both release binaries with embedded UI assets
 build-release:
