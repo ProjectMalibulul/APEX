@@ -2,6 +2,11 @@
 
 Apex is a local-first architecture workbench for understanding source repositories. It scans code, builds an architecture graph, checks rules, and generates diagrams from your machine without uploading source anywhere.
 
+> Note: This project was created to quickly build UML and UML like diagrams for repository unknown to the user to keep track of basic dependencies. I often found myself losing track of what I saw before when I go through a few levels of "See definition" in my IDEs. APEX was created to mitigate that issue. **THIS WILL NOT DETECT HIGH LEVEL SEMANTIC DEPENDANCIES ACROSS PACKAGES AND WAS NOT DESIGNED TO DO SO**. I'd be more than happy to review your PRs if anyone wants to include these advanced features. But, I myself won't be doing so, atleast for a while.
+
+I'd only recomend this to be used for understanding basic high level structure of code based when you're seeing the repository for the first time, for example when you've vibe coded some project and want to verify how everything works or when you want to understand some popular code base. Regardless, please don't use this for generating UMLs for your projects as the graphs themselves might contain errors / miss a few edges or nodes.
+
+
 ## Why use Apex?
 
 - **See the architecture quickly**: generate SVG, Mermaid, HTML, and JSON diagrams from a repository path.
@@ -87,5 +92,4 @@ User-facing docs live in [`docs/`](docs/):
 - [VS Code integration](docs/vscode.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
-Internal build notes and generated state belong in `.state/`, which is ignored by Git.
 
