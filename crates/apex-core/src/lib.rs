@@ -1587,7 +1587,7 @@ fn parse_typescript(graph: &mut Graph, path: &str, content: &str) {
         if let Some(parent) = after_keyword(&span.header, "extends") {
             graph.add_edge(node_id.clone(), format!("type:{parent}"), EdgeKind::Extends);
         }
-        if let Some(interface) = after_keyword(&span.header, "implements") {
+        for interface in after_keyword_all(&span.header, "implements") {
             graph.add_edge(
                 node_id.clone(),
                 format!("type:{interface}"),
@@ -1702,7 +1702,7 @@ fn parse_java(graph: &mut Graph, path: &str, content: &str) {
         if let Some(parent) = after_keyword(&span.header, "extends") {
             graph.add_edge(node_id.clone(), format!("type:{parent}"), EdgeKind::Extends);
         }
-        if let Some(interface) = after_keyword(&span.header, "implements") {
+        for interface in after_keyword_all(&span.header, "implements") {
             graph.add_edge(
                 node_id.clone(),
                 format!("type:{interface}"),
@@ -1932,15 +1932,22 @@ fn parse_kotlin(graph: &mut Graph, path: &str, content: &str) {
         if node_id.is_empty() {
             continue;
         }
-        if let Some(parent) = span
-            .header
-            .split(':')
-            .nth(1)
-            .and_then(|value| value.split(['(', '{', ',']).next())
-        {
-            let parent = parent.trim();
-            if !parent.is_empty() {
-                graph.add_edge(node_id.clone(), format!("type:{parent}"), EdgeKind::Extends);
+        if let Some(supertypes) = span.header.split(':').nth(1) {
+            let supertypes = supertypes.split('{').next().unwrap_or("");
+            for supertype in supertypes.split(',') {
+                let parent = supertype
+                    .trim()
+                    .split(['(', '<'])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if !parent.is_empty() {
+                    graph.add_edge(
+                        node_id.clone(),
+                        format!("type:{parent}"),
+                        EdgeKind::Extends,
+                    );
+                }
             }
         }
         for member in extract_curly_members(&span.body, BraceLanguage::Kotlin) {
@@ -2683,6 +2690,29 @@ fn after_keyword(line: &str, keyword: &str) -> Option<String> {
         .unwrap_or_default()
         .to_string();
     (!name.is_empty()).then_some(name)
+}
+
+/// Returns every comma-separated type name following `keyword` (e.g. all
+/// interfaces after `implements`), stopping at the body brace.
+fn after_keyword_all(line: &str, keyword: &str) -> Vec<String> {
+    let parts: Vec<_> = line.split_whitespace().collect();
+    let Some(index) = parts.iter().position(|part| *part == keyword) else {
+        return Vec::new();
+    };
+    let rest = parts[index + 1..].join(" ");
+    let rest = rest.split('{').next().unwrap_or("");
+    rest.split(',')
+        .filter_map(|segment| {
+            let name = segment
+                .trim()
+                .trim_matches([':', ';'])
+                .split(['<', '(', '{'])
+                .next()
+                .unwrap_or("")
+                .trim();
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect()
 }
 
 fn has_path(graph: &Graph, current: &str, target: &str, seen: &mut BTreeSet<String>) -> bool {
