@@ -1688,9 +1688,9 @@ fn parse_java(graph: &mut Graph, path: &str, content: &str) {
     let file_id = insert_file_node(graph, path);
     let spans = extract_brace_type_spans(content, &["class", "interface"]);
     let imports = collect_java_style_imports(content, "import ");
-    let entity_file = content.contains("@Entity");
+    let entity_classes = annotated_java_types(content, "@Entity");
     for span in &spans {
-        let kind = if entity_file {
+        let kind = if entity_classes.contains(&span.name) {
             NodeKind::Entity
         } else {
             NodeKind::Type
@@ -2690,6 +2690,37 @@ fn after_keyword(line: &str, keyword: &str) -> Option<String> {
         .unwrap_or_default()
         .to_string();
     (!name.is_empty()).then_some(name)
+}
+
+/// Returns the set of class/interface names directly carrying `annotation`
+/// (e.g. `@Entity`), checking the annotation lines immediately preceding each
+/// declaration as well as annotations placed inline on the declaration line.
+fn annotated_java_types(content: &str, annotation: &str) -> BTreeSet<String> {
+    let mut result = BTreeSet::new();
+    let mut pending = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let has_inline = trimmed.contains(annotation);
+        if trimmed.starts_with(annotation) {
+            pending = true;
+            if !trimmed.contains("class ") && !trimmed.contains("interface ") {
+                continue;
+            }
+        }
+        let name = after_keyword(trimmed, "class").or_else(|| after_keyword(trimmed, "interface"));
+        if let Some(name) = name {
+            if pending || has_inline {
+                result.insert(name);
+            }
+            pending = false;
+        } else if !trimmed.starts_with('@') {
+            pending = false;
+        }
+    }
+    result
 }
 
 /// Returns every comma-separated type name following `keyword` (e.g. all
