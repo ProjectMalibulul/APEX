@@ -2040,12 +2040,13 @@ fn parse_sql(graph: &mut Graph, path: &str, content: &str) {
                 });
             }
         } else if let Some(source) = &current {
-            if lower.contains("references ") {
-                let target = lower
-                    .split("references ")
-                    .nth(1)
-                    .and_then(|value| value.split([' ', '(']).next())
-                    .unwrap_or_default();
+            if let Some(pos) = lower.find("references ") {
+                let after = &trimmed[pos + "references ".len()..];
+                let target = after
+                    .split([' ', '('])
+                    .next()
+                    .unwrap_or_default()
+                    .trim_matches(['"', '`', '[', ']']);
                 if !target.is_empty() {
                     graph.add_edge(
                         source.clone(),
