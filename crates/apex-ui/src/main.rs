@@ -167,6 +167,7 @@ fn handle_api_route(path: &str, query: &str) -> (u16, &'static str, String) {
                         "json" => ("application/json; charset=utf-8", g.to_json()),
                         "mermaid" => ("text/plain; charset=utf-8", g.to_mermaid()),
                         "svg" => ("image/svg+xml; charset=utf-8", g.to_svg()),
+                        "html" => ("text/html; charset=utf-8", graph_to_html(&g)),
                         _ => unreachable!(),
                     };
                     (200, ct, body)
@@ -306,7 +307,25 @@ fn escape_json(s: &str) -> String {
 }
 
 fn is_format(s: &str) -> bool {
-    matches!(s, "svg" | "mermaid" | "json")
+    matches!(s, "svg" | "mermaid" | "json" | "html")
+}
+
+fn graph_to_html(graph: &apex_core::Graph) -> String {
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Apex Diagram</title><style>{}</style></head><body><main><header><h1>Apex Diagram</h1><p>{} nodes · {} edges</p></header><section class=\"diagram\">{}</section><details><summary>Graph JSON</summary><pre>{}</pre></details></main></body></html>",
+        "body{margin:0;font-family:Inter,system-ui,sans-serif;background:#0d1117;color:#e6edf3}main{padding:24px}header{margin-bottom:16px}.diagram{overflow:auto;background:#fff;border-radius:12px;padding:24px}svg{max-width:none}details{margin-top:16px}pre{overflow:auto;background:#161b22;padding:16px;border-radius:8px}",
+        graph.nodes.len(),
+        graph.edges.len(),
+        graph.to_svg(),
+        escape_html(&graph.to_json())
+    )
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 // ── Query parsing ────────────────────────────────────────────────────────────
