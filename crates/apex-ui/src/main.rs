@@ -11,9 +11,11 @@ use std::path::PathBuf;
 struct UiAssets;
 
 fn main() {
-    let port = find_free_port(4322);
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
-        .unwrap_or_else(|e| panic!("failed to bind to port {port}: {e}"));
+    let listener = bind_free_listener(4322);
+    let port = listener
+        .local_addr()
+        .map(|addr| addr.port())
+        .unwrap_or(4322);
     let url = format!("http://127.0.0.1:{port}");
     println!("Apex  →  {url}");
     println!("Press Ctrl+C to stop.");
@@ -36,10 +38,10 @@ fn main() {
     }
 }
 
-fn find_free_port(start: u16) -> u16 {
+fn bind_free_listener(start: u16) -> TcpListener {
     for port in start.. {
-        if TcpListener::bind(format!("127.0.0.1:{port}")).is_ok() {
-            return port;
+        if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{port}")) {
+            return listener;
         }
     }
     panic!("no free port found starting from {start}");
