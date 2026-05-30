@@ -2017,9 +2017,15 @@ fn parse_sql(graph: &mut Graph, path: &str, content: &str) {
         let trimmed = line.trim().trim_end_matches(';');
         let lower = trimmed.to_ascii_lowercase();
         if lower.starts_with("create table") {
-            let name = trimmed
+            let rest = trimmed["create table".len()..].trim_start();
+            let rest = if rest.len() >= 13 && rest[..13].eq_ignore_ascii_case("if not exists") {
+                rest[13..].trim_start()
+            } else {
+                rest
+            };
+            let name = rest
                 .split_whitespace()
-                .nth(2)
+                .next()
                 .unwrap_or_default()
                 .trim_matches(['"', '`', '[', ']', '(']);
             if !name.is_empty() {
