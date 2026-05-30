@@ -1646,27 +1646,27 @@ fn parse_python(graph: &mut Graph, path: &str, content: &str) {
             if name.is_empty() {
                 continue;
             }
+            let bases = rest
+                .split('(')
+                .nth(1)
+                .and_then(|value| value.split(')').next())
+                .unwrap_or("");
+            let is_entity = bases.contains("models.Model");
             let node_id = insert_type_node(
                 graph,
                 path,
                 &file_id,
                 &name,
-                if content.contains("models.Model") {
+                if is_entity {
                     NodeKind::Entity
                 } else {
                     NodeKind::Type
                 },
             );
             current_class = Some(node_id.clone());
-            if let Some(parent) = rest
-                .split('(')
-                .nth(1)
-                .and_then(|value| value.split(')').next())
-            {
-                let parent = parent.trim();
-                if !parent.is_empty() {
-                    graph.add_edge(node_id, format!("type:{parent}"), EdgeKind::Extends);
-                }
+            if !bases.trim().is_empty() {
+                let parent = bases.trim();
+                graph.add_edge(node_id, format!("type:{parent}"), EdgeKind::Extends);
             }
         }
         if trimmed.contains("ForeignKey(") {
