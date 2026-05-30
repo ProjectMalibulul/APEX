@@ -286,15 +286,12 @@ impl ExportOptions {
             }
             index += 1;
         }
-        if positional.len() == 1 {
-            if is_format(&positional[0]) {
-                format = positional[0].clone();
+        for value in &positional {
+            if is_format(value) {
+                format = value.clone();
             } else {
-                root = positional[0].clone();
+                root = value.clone();
             }
-        } else if positional.len() >= 2 {
-            format = positional[0].clone();
-            root = positional[1].clone();
         }
         if !is_format(&format) {
             return Err(format!("unsupported export format '{format}'"));
