@@ -29,7 +29,7 @@ export interface GraphMetrics {
   readonly cycles: readonly (readonly string[])[];
   readonly orphans: readonly string[];
   readonly layer_mix: Record<string, number>;
-  readonly layer_edges: Record<string, number>;
+  readonly layer_edges: readonly { from: string; to: string; count: number }[];
 }
 
 export async function getMetrics(path: string): Promise<GraphMetrics> {
