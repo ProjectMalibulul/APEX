@@ -2366,7 +2366,7 @@ fn parse_ruby(graph: &mut Graph, path: &str, content: &str) {
             let r = rest.trim().trim_matches(['"', '\'', ' ']);
             if let Some(name) = r.rsplit('/').next() {
                 if !name.is_empty() {
-                    requires.push(name.to_string());
+                    requires.push(snake_to_camel(name));
                 }
             }
             continue;
@@ -2429,7 +2429,25 @@ fn parse_ruby(graph: &mut Graph, path: &str, content: &str) {
             depth += 1;
         }
     }
-    let _ = requires;
+    for target in requires {
+        add_semantic_reference(graph, &file_id, &target, &target, EdgeKind::Imports, None);
+    }
+}
+
+/// Converts a Ruby `snake_case` require path stem to its conventional
+/// `CamelCase` constant name (e.g. `user_repository` -> `UserRepository`).
+fn snake_to_camel(value: &str) -> String {
+    value
+        .split('_')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 fn parse_scala(graph: &mut Graph, path: &str, content: &str) {
